@@ -241,13 +241,19 @@ const toggleFlag = async (req, res) => {
 
 const evaluateFlagRoute = async (req, res) => {
   try {
-    const { key, userId } = req.body;
+    const { key, userId, tenantId } = req.body;
 
     if (!key) {
       return res.status(400).json({ message: "Flag key is required" });
     }
 
-    const flag = await FeatureFlag.findOne({ key, tenantId: req.query.tenantId || req.user?.tenantId });
+    const resolvedTenantId = tenantId || req.query.tenantId || req.user?.tenantId;
+
+    if (!resolvedTenantId) {
+      return res.status(400).json({ message: "Tenant context is required" });
+    }
+
+    const flag = await FeatureFlag.findOne({ key, tenantId: resolvedTenantId });
 
     if (!flag) {
       return res.status(404).json({ message: "Feature flag not found" });
@@ -255,7 +261,11 @@ const evaluateFlagRoute = async (req, res) => {
 
     const enabled = evaluateFlag(flag, { userId, flagKey: key });
 
-    return res.status(200).json({ enabled, flagKey: key });
+    return res.status(200).json({
+      enabled,
+      flagKey: key,
+      message: enabled ? "Feature Enabled" : "Feature Disabled",
+    });
   } catch (error) {
     return res.status(500).json({ message: "Failed to evaluate flag", error: error.message });
   }

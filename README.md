@@ -2,16 +2,8 @@
 
 A lightweight MVP for a multi-tenant feature-flag admin panel with JWT authentication, RBAC, deterministic percentage rollouts, and audit logging.
 
-## Project Overview
-This project demonstrates a production-style SaaS admin experience for managing feature flags across multiple tenants. It includes tenant-aware access, role-based permissions, and a deterministic evaluation strategy to ensure the same user always receives the same rollout result.
-
-## Features Implemented
-- JWT authentication with access and refresh tokens
-- Tenant and feature-flag CRUD
-- Owner/admin-only mutation routes and member/viewer read access
-- Deterministic rollout evaluation using a hash of `${userId}:${flagKey}`
-- Audit log capture for create, update, toggle, and delete actions
-- React client with login, registration, dashboard, tenant management, and flag management
+## Project
+A production-style SaaS-style admin experience for managing feature flags across multiple tenants. It includes tenant-aware access, role-based permissions, and deterministic rollout evaluation.
 
 ## Tech Stack
 - Frontend: React + Vite
@@ -19,7 +11,18 @@ This project demonstrates a production-style SaaS admin experience for managing 
 - Auth: JWT access/refresh tokens
 - Rollout logic: SHA-256 hashing for consistent bucketing
 
-## Setup Instructions
+## Folder Structure
+```text
+client/         # React frontend
+server/         # Express backend
+server/src/controllers/  # Auth, tenant, and flag controllers
+server/src/models/        # MongoDB schemas
+server/src/routes/        # API routes
+server/src/utils/         # rollout evaluation helper
+server/tests/             # evaluation tests
+```
+
+## Setup
 ### 1. Clone the repository
 ```bash
 git clone https://github.com/Guptsonu22/multi-tenant-feature-flag-admin.git
@@ -55,13 +58,7 @@ cd client
 npm run dev
 ```
 
-## Screenshots
-- Login and registration screens
-- Dashboard with tenant and flag summaries
-- Feature flag management with toggle controls
-- Audit log panel for recent flag updates
-
-## API Documentation
+## API Routes
 ### Auth
 - POST /api/auth/register
 - POST /api/auth/login
@@ -81,6 +78,18 @@ npm run dev
 - PATCH /api/flags/:id/toggle
 - POST /api/flags/evaluate
 
+## Screenshots
+- Login and registration screens
+- Dashboard with tenant and flag summaries
+- Feature flag management table and toggle controls
+- Audit log panel for recent flag changes
+
+## Future Improvements
+- Add targeted rollout rules by user attribute
+- Add webhook support for flag changes
+- Add scheduled flag flips
+- Add invite-based multi-user tenant onboarding
+
 ## Testing
 ```bash
 cd server
@@ -98,8 +107,6 @@ Created frontend authentication
 Implemented dashboard
 Connected frontend with backend APIs
 Fix registration API proxy issue
-Final project submission
+Enhance tenant and flag management UI
+Finalize project documentation
 ```
-
-## Notes
-The application is intentionally scoped as an MVP and focuses on end-to-end authentication, tenant isolation, deterministic rollout evaluation, and audit visibility.

@@ -437,6 +437,12 @@ function TenantsPage({ api }) {
   const submit = async (event) => {
     event.preventDefault()
     setMessage('')
+
+    if (!form.name.trim()) {
+      setMessage('❌ Please fill all fields.')
+      return
+    }
+
     setIsSubmitting(true)
 
     try {
@@ -547,9 +553,10 @@ function FeatureFlagsPage({ api }) {
   const [form, setForm] = useState({ name: '', key: '', description: '', enabled: false, tenantId: '' })
   const [message, setMessage] = useState('')
   const [auditLogs, setAuditLogs] = useState([])
-  const [evaluateForm, setEvaluateForm] = useState({ key: '', userId: '' })
+  const [evaluateForm, setEvaluateForm] = useState({ key: '', userId: '', tenantId: '' })
   const [evaluation, setEvaluation] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isEvaluating, setIsEvaluating] = useState(false)
   const [editingFlagId, setEditingFlagId] = useState(null)
 
   const loadData = useCallback(async () => {
@@ -577,6 +584,12 @@ function FeatureFlagsPage({ api }) {
   const submit = async (event) => {
     event.preventDefault()
     setMessage('')
+
+    if (!form.name.trim() || !form.key.trim() || !form.tenantId) {
+      setMessage('❌ Please fill all fields.')
+      return
+    }
+
     setIsSubmitting(true)
 
     try {
@@ -602,7 +615,12 @@ function FeatureFlagsPage({ api }) {
       setMessage(`✅ Flag ${editingFlagId ? 'updated' : 'created'} successfully`)
       await loadData()
     } catch (err) {
-      setMessage(`❌ ${err.message}`)
+      const text = err.message || ''
+      if (text.includes('already exists')) {
+        setMessage('❌ Flag already exists.')
+      } else {
+        setMessage(`❌ ${text}`)
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -627,7 +645,7 @@ function FeatureFlagsPage({ api }) {
   }
 
   const removeFlag = async (flag) => {
-    if (!window.confirm(`Delete flag ${flag.name}?`)) {
+    if (!window.confirm('Delete this feature?')) {
       return
     }
 
@@ -644,17 +662,27 @@ function FeatureFlagsPage({ api }) {
     event.preventDefault()
     setMessage('')
 
+    if (!evaluateForm.key.trim() || !evaluateForm.userId.trim() || !evaluateForm.tenantId) {
+      setMessage('❌ Please fill all fields.')
+      return
+    }
+
+    setIsEvaluating(true)
+
     try {
       const data = await api.request('/flags/evaluate', {
         method: 'POST',
         body: JSON.stringify({
           key: evaluateForm.key,
           userId: evaluateForm.userId,
+          tenantId: evaluateForm.tenantId,
         }),
       })
       setEvaluation(data)
     } catch (err) {
       setMessage(`❌ ${err.message}`)
+    } finally {
+      setIsEvaluating(false)
     }
   }
 
@@ -747,13 +775,25 @@ function FeatureFlagsPage({ api }) {
           onChange={(event) => setEvaluateForm({ ...evaluateForm, userId: event.target.value })}
           required
         />
-        <button className="ghost-button" type="submit">
-          Evaluate
+        <select
+          value={evaluateForm.tenantId}
+          onChange={(event) => setEvaluateForm({ ...evaluateForm, tenantId: event.target.value })}
+          required
+        >
+          <option value="">Select tenant</option>
+          {tenants.map((tenant) => (
+            <option key={tenant._id} value={tenant._id}>
+              {tenant.name}
+            </option>
+          ))}
+        </select>
+        <button className="ghost-button" type="submit" disabled={isEvaluating}>
+          {isEvaluating ? 'Checking...' : 'Evaluate'}
         </button>
       </form>
       {evaluation && (
         <p className="success-text">
-          {evaluation.flagKey} is {evaluation.enabled ? 'enabled' : 'disabled'} for user {evaluation.userId || evaluateForm.userId}
+          {evaluation.message || `${evaluation.flagKey} is ${evaluation.enabled ? 'enabled' : 'disabled'} for user ${evaluation.userId || evaluateForm.userId}`}
         </p>
       )}
       <div className="table-wrap">
