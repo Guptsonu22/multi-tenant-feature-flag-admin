@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const API_URL = import.meta.env.VITE_API_URL || '/api'
 
 const initialFlags = [
   {
@@ -60,7 +60,8 @@ function App() {
           },
         })
 
-        const data = await response.json()
+        const text = await response.text()
+        const data = text ? JSON.parse(text) : {}
 
         if (!response.ok) {
           throw new Error(data.message || 'Request failed')
