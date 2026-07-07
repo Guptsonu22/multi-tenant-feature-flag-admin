@@ -1,35 +1,120 @@
 # Multi-Tenant Feature Flag Admin
 
-A lightweight MVP for a multi-tenant feature-flag admin panel with JWT authentication, RBAC, deterministic percentage rollouts, and audit logging.
+A full-stack administration dashboard for managing tenants and tenant-scoped feature flags. The project demonstrates JWT authentication, role-based access control (RBAC), tenant isolation, deterministic flag evaluation, audit logging, and a responsive React interface.
 
-## Project
-A production-style SaaS-style admin experience for managing feature flags across multiple tenants. It includes tenant-aware access, role-based permissions, and deterministic rollout evaluation.
+## Features
+
+- User registration and login
+- JWT access and refresh tokens
+- Password hashing with bcrypt
+- Role-based authorization for protected operations
+- Tenant create, read, update, and delete operations
+- Tenant-scoped feature flag CRUD and enable/disable controls
+- Public feature flag evaluation endpoint
+- Audit history for flag creation, updates, toggles, and deletion
+- Dashboard statistics for tenants and flags
+- Deterministic percentage-rollout utility with automated tests
 
 ## Tech Stack
-- Frontend: React + Vite
-- Backend: Express + MongoDB + Mongoose
-- Auth: JWT access/refresh tokens
-- Rollout logic: SHA-256 hashing for consistent bucketing
 
-## Folder Structure
+### Frontend
+
+- React 19
+- Vite 8
+- JavaScript and CSS
+- Browser Fetch API
+
+### Backend
+
+- Node.js
+- Express 5
+- MongoDB and Mongoose
+- JSON Web Tokens (`jsonwebtoken`)
+- `bcryptjs`
+- Node.js `crypto` for SHA-256 rollout bucketing
+
+## Architecture
+
 ```text
-client/         # React frontend
-server/         # Express backend
-server/src/controllers/  # Auth, tenant, and flag controllers
-server/src/models/        # MongoDB schemas
-server/src/routes/        # API routes
-server/src/utils/         # rollout evaluation helper
-server/tests/             # evaluation tests
+React client
+    |
+    | HTTP/JSON (/api)
+    v
+Express routes
+    |
+    +-- Authentication and authorization middleware
+    +-- Controllers (auth, tenants, and flags)
+    +-- Flag evaluation utility
+    |
+    v
+Mongoose models
+    |
+    v
+MongoDB
 ```
 
-## Setup
-### 1. Clone the repository
+The API follows a route-controller-model structure. Protected requests carry a bearer token, authentication middleware adds the decoded user to the request, and controllers scope database operations using the user's tenant ID. The Vite development server proxies `/api` requests to the Express server.
+
+## Folder Structure
+
+```text
+multi-tenant-feature-flag-admin/
+|-- client/
+|   |-- public/
+|   |-- src/
+|   |   |-- assets/
+|   |   |-- App.jsx
+|   |   |-- App.css
+|   |   |-- index.css
+|   |   `-- main.jsx
+|   |-- package.json
+|   `-- vite.config.js
+|-- server/
+|   |-- src/
+|   |   |-- config/
+|   |   |-- controllers/
+|   |   |-- middleware/
+|   |   |-- models/
+|   |   |-- routes/
+|   |   |-- utils/
+|   |   |-- app.js
+|   |   `-- server.js
+|   |-- tests/
+|   `-- package.json
+`-- README.md
+```
+
+## Prerequisites
+
+- Node.js 18 or newer
+- npm
+- A local MongoDB instance or MongoDB Atlas connection string
+
+## Environment Variables
+
+Create `server/.env`:
+
+```env
+PORT=5000
+MONGODB_URI=mongodb://127.0.0.1:27017/feature-flag-admin
+JWT_SECRET=replace-with-a-long-random-secret
+```
+
+The client uses `/api` by default. For a separately hosted API, create `client/.env`:
+
+```env
+VITE_API_URL=http://localhost:5000/api
+```
+
+## Installation and Setup
+
 ```bash
 git clone https://github.com/Guptsonu22/multi-tenant-feature-flag-admin.git
 cd multi-tenant-feature-flag-admin
 ```
 
-### 2. Install dependencies
+Install both applications:
+
 ```bash
 cd server
 npm install
@@ -37,76 +122,200 @@ cd ../client
 npm install
 ```
 
-### 3. Environment variables
-Create a .env file in the server folder.
+Start MongoDB, then run the backend from the `server` directory:
 
-```env
-PORT=5000
-MONGODB_URI=mongodb://127.0.0.1:27017/feature-flag-admin
-JWT_SECRET=replace-with-a-strong-secret
-```
-
-### 4. Run the app
 ```bash
-cd server
 npm run dev
 ```
 
-In a second terminal:
+In a second terminal, run the frontend from the `client` directory:
+
+```bash
+npm run dev
+```
+
+Open the URL printed by Vite (normally `http://localhost:5173`). The API runs on `http://localhost:5000` by default.
+
+For a production-style frontend build:
+
 ```bash
 cd client
-npm run dev
+npm run build
+npm run preview
 ```
 
+## Authentication Flow
+
+1. Registration creates a tenant workspace and its first `owner` user.
+2. The password is hashed with bcrypt before storage.
+3. Registration and login return an access token and refresh token.
+4. The client sends the access token as `Authorization: Bearer <token>`.
+5. Protected routes verify the token and attach its `userId`, `tenantId`, and `role` claims to the request.
+6. `POST /api/auth/refresh` accepts a valid refresh token and issues a new access token.
+
+Access tokens expire after one day; refresh tokens expire after seven days.
+
+## RBAC and Tenant Isolation
+
+The user model supports `owner`, `admin`, `member`, and `viewer` roles. New registrations create an `owner`. Tenant CRUD and flag mutations require `owner` or `admin`; authenticated users may read flags.
+
+Flag reads, updates, toggles, and deletes are filtered using the tenant ID from the authenticated token. Feature flag keys are unique per tenant through a compound MongoDB index on `{ tenantId, key }`.
+
+> Note: the current MVP has no user-management or invitation screen, so additional roles must currently be provisioned outside the UI.
+
 ## API Routes
-### Auth
-- POST /api/auth/register
-- POST /api/auth/login
-- POST /api/auth/refresh
+
+Unless marked public, send an access token in the `Authorization` header.
+
+### Authentication
+
+| Method | Route | Access | Purpose |
+|---|---|---|---|
+| `POST` | `/api/auth/register` | Public | Create an owner and tenant workspace |
+| `POST` | `/api/auth/login` | Public | Sign in and receive tokens |
+| `POST` | `/api/auth/refresh` | Public | Exchange a refresh token for an access token |
 
 ### Tenants
-- POST /api/tenants
-- GET /api/tenants
-- PUT /api/tenants/:id
-- DELETE /api/tenants/:id
+
+| Method | Route | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/tenants` | Owner/Admin | List tenants |
+| `POST` | `/api/tenants` | Owner/Admin | Create a tenant |
+| `PUT` | `/api/tenants/:id` | Owner/Admin | Update a tenant |
+| `DELETE` | `/api/tenants/:id` | Owner/Admin | Delete a tenant |
 
 ### Feature Flags
-- POST /api/flags
-- GET /api/flags
-- PUT /api/flags/:id
-- DELETE /api/flags/:id
-- PATCH /api/flags/:id/toggle
-- POST /api/flags/evaluate
 
-## Screenshots
-- Login and registration screens
-- Dashboard with tenant and flag summaries
-- Feature flag management table and toggle controls
-- Audit log panel for recent flag changes
+| Method | Route | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/flags` | Authenticated | List current-tenant flags and recent audit entries |
+| `POST` | `/api/flags` | Owner/Admin | Create a flag |
+| `PUT` | `/api/flags/:id` | Owner/Admin | Update a flag |
+| `PATCH` | `/api/flags/:id/toggle` | Owner/Admin | Toggle a flag |
+| `DELETE` | `/api/flags/:id` | Owner/Admin | Delete a flag |
+| `POST` | `/api/flags/evaluate` | Public | Evaluate a tenant flag for a user |
 
-## Future Improvements
-- Add targeted rollout rules by user attribute
-- Add webhook support for flag changes
-- Add scheduled flag flips
-- Add invite-based multi-user tenant onboarding
+Example evaluation request:
 
-## Testing
+```json
+{
+  "key": "new_dashboard",
+  "userId": "user-123",
+  "tenantId": "TENANT_OBJECT_ID"
+}
+```
+
+## Flag Evaluation and Rollout Logic
+
+Boolean flags return their stored `enabled` value. The rollout utility also supports percentage flags by hashing the stable input `userId:flagKey` with SHA-256, taking a bucket from `0` to `99`, and enabling the flag when that bucket is below `rolloutPercentage`.
+
+This makes evaluation deterministic: the same user and flag key always produce the same result. Missing user or flag identifiers fail closed.
+
+The percentage algorithm is implemented and tested at utility level. The current database schema, controllers, and UI configure boolean flags only; persisting and managing percentage flags end to end is listed as a future improvement.
+
+## Audit Logging
+
+Flag creation, update, toggle, and deletion create audit records containing:
+
+- Tenant and actor IDs
+- Action name
+- Before and after snapshots
+- Creation timestamp
+
+The latest 20 audit records for the authenticated tenant are returned with the flag list and displayed in the dashboard.
+
+## Testing and Quality Checks
+
+Run backend rollout tests:
+
 ```bash
 cd server
 node --test tests/flagEvaluation.test.js
 ```
 
-## Commit History
-```text
-Initial backend setup
-Completed authentication module
-Implemented tenant CRUD
-Completed feature flag CRUD
-Added role based authorization
-Created frontend authentication
-Implemented dashboard
-Connected frontend with backend APIs
-Fix registration API proxy issue
-Enhance tenant and flag management UI
-Finalize project documentation
+Run frontend linting and verify a production build:
+
+```bash
+cd client
+npm run lint
+npm run build
 ```
+
+The automated tests currently cover boolean evaluation and deterministic percentage bucketing. API integration, authorization, and component tests remain future work.
+
+## Screenshots
+
+Add captured images to a `docs/screenshots/` directory and replace the placeholders below:
+
+### Authentication
+
+_Login and registration screenshot_
+
+### Dashboard
+
+_Dashboard statistics screenshot_
+
+### Tenant Management
+
+_Tenant CRUD screenshot_
+
+### Feature Flags and Audit History
+
+_Feature flag controls and audit history screenshot_
+
+## Trade-offs
+
+- A single React file keeps this assignment-sized frontend simple, but larger applications should split pages, API services, and shared components.
+- Tokens are stored in `localStorage`, which is straightforward for an MVP but less resistant to XSS than secure, HTTP-only cookies.
+- Refresh tokens are stateless and are not persisted or revocable.
+- The public evaluation endpoint favors easy SDK-style access but currently has no API key, rate limiting, or request signing.
+- MongoDB compound indexes provide per-tenant key uniqueness without introducing a separate configuration service or cache.
+- Audit history is embedded in the flag-list response for simplicity rather than exposed through a paginated endpoint.
+- The application uses local development processes instead of Docker or cloud deployment configuration.
+
+## What I Would Do with More Time
+
+- Add percentage rollout fields to the model, API, and UI
+- Add attribute-based targeting and rule priority
+- Add organization invitations and user/role management
+- Use HTTP-only cookies with refresh-token rotation and revocation
+- Secure evaluation with environment-scoped SDK/API keys and rate limiting
+- Add pagination, filtering, and search
+- Add API validation and OpenAPI/Swagger documentation
+- Add integration, authorization, and React component tests
+- Add webhook notifications and scheduled flag changes
+- Add Redis caching for high-volume evaluation
+- Add Docker, CI/CD, monitoring, and production deployment files
+
+## Git Commit History
+
+The repository was developed incrementally with focused commits, including:
+
+```text
+d49b053 Initial project setup
+0af3413 Completed authentication module
+7f4827b Implemented tenant CRUD
+dcfe485 Completed feature flag CRUD
+3daf66c Added role based authorization
+8b5fc66 Frontend pages completed
+7a917e7 Connected frontend with backend APIs
+617818a Fix registration API proxy issue
+dacb54a Enhance tenant and flag management UI
+aca1507 Complete feature flag CRUD improvements and UI polish
+```
+
+View the complete history with:
+
+```bash
+git log --oneline
+```
+
+## Repository
+
+[github.com/Guptsonu22/multi-tenant-feature-flag-admin](https://github.com/Guptsonu22/multi-tenant-feature-flag-admin)
+
+## Author
+
+Sonu Gupta<br>
+B.Tech Information Technology<br>
+Full-Stack Developer
