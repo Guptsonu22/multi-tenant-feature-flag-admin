@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 const Tenant = require("../models/Tenant");
 const User = require("../models/User");
 
-const signToken = (user) => {
+const signToken = (user, type = "access") => {
   if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET is not configured");
   }
@@ -14,9 +14,10 @@ const signToken = (user) => {
       userId: user._id,
       tenantId: user.tenantId,
       role: user.role,
+      tokenType: type,
     },
     process.env.JWT_SECRET,
-    { expiresIn: "1d" }
+    { expiresIn: type === "refresh" ? "7d" : "1d" }
   );
 };
 
@@ -50,11 +51,13 @@ const register = async (req, res) => {
       tenantId: tenant._id,
     });
 
-    const token = signToken(user);
+    const accessToken = signToken(user, "access");
+    const refreshToken = signToken(user, "refresh");
 
     return res.status(201).json({
       message: "User registered successfully",
-      token,
+      accessToken,
+      refreshToken,
       user: {
         id: user._id,
         name: user.name,
@@ -91,11 +94,13 @@ const login = async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    const token = signToken(user);
+    const accessToken = signToken(user, "access");
+    const refreshToken = signToken(user, "refresh");
 
     return res.status(200).json({
       message: "Login successful",
-      token,
+      accessToken,
+      refreshToken,
       user: {
         id: user._id,
         name: user.name,
@@ -112,7 +117,36 @@ const login = async (req, res) => {
   }
 };
 
+const refresh = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({ message: "Refresh token is required" });
+    }
+
+    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+
+    if (decoded.tokenType !== "refresh") {
+      return res.status(401).json({ message: "Invalid refresh token" });
+    }
+
+    const user = await User.findById(decoded.userId);
+
+    if (!user) {
+      return res.status(401).json({ message: "User no longer exists" });
+    }
+
+    const accessToken = signToken(user, "access");
+
+    return res.status(200).json({ accessToken });
+  } catch (error) {
+    return res.status(401).json({ message: "Invalid or expired refresh token" });
+  }
+};
+
 module.exports = {
   register,
   login,
+  refresh,
 };

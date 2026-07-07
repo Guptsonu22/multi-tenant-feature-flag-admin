@@ -3,6 +3,7 @@ const express = require("express");
 const {
   createFlag,
   deleteFlag,
+  evaluateFlagRoute,
   getFlags,
   toggleFlag,
   updateFlag,
@@ -14,6 +15,7 @@ const router = express.Router();
 
 router.post("/", authMiddleware, authorize("owner", "admin"), createFlag);
 router.get("/", authMiddleware, getFlags);
+router.post("/evaluate", evaluateFlagRoute);
 router.put("/:id", authMiddleware, authorize("owner", "admin"), updateFlag);
 router.delete("/:id", authMiddleware, authorize("owner", "admin"), deleteFlag);
 router.patch(

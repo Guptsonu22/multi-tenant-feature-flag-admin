@@ -91,6 +91,12 @@ input:focus {
   font-weight: 700;
 }
 
+.success-text {
+  color: #166534;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .app-shell {
   background: #eef2f7;
   display: grid;

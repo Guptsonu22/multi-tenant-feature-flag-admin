@@ -1,4 +1,6 @@
 const FeatureFlag = require("../models/FeatureFlag");
+const AuditLog = require("../models/AuditLog");
+const { evaluateFlag } = require("../utils/flagEvaluation");
 
 const getTenantId = (req) => req.user && req.user.tenantId;
 
@@ -22,6 +24,14 @@ const createFlag = async (req, res) => {
       enabled,
       tenantId,
       createdBy: req.user.userId,
+    });
+
+    await AuditLog.create({
+      tenantId,
+      actorId: req.user.userId,
+      action: "create",
+      before: null,
+      after: { name: flag.name, key: flag.key, enabled: flag.enabled },
     });
 
     return res.status(201).json({
@@ -51,8 +61,9 @@ const getFlags = async (req, res) => {
     }
 
     const flags = await FeatureFlag.find({ tenantId }).sort({ createdAt: -1 });
+    const auditLogs = await AuditLog.find({ tenantId }).sort({ createdAt: -1 }).limit(20);
 
-    return res.status(200).json({ flags });
+    return res.status(200).json({ flags, auditLogs });
   } catch (error) {
     return res.status(500).json({
       message: "Failed to fetch feature flags",
@@ -74,11 +85,35 @@ const updateFlag = async (req, res) => {
       return res.status(400).json({ message: "No update fields provided" });
     }
 
+    const existing = await FeatureFlag.findOne({ _id: req.params.id, tenantId });
+
+    if (!existing) {
+      return res.status(404).json({ message: "Feature flag not found" });
+    }
+
     const flag = await FeatureFlag.findOneAndUpdate(
       { _id: req.params.id, tenantId },
       { name, key, description, enabled },
       { new: true, runValidators: true }
     );
+
+    await AuditLog.create({
+      tenantId,
+      actorId: req.user.userId,
+      action: "update",
+      before: {
+        name: existing.name,
+        key: existing.key,
+        description: existing.description,
+        enabled: existing.enabled,
+      },
+      after: {
+        name: flag.name,
+        key: flag.key,
+        description: flag.description,
+        enabled: flag.enabled,
+      },
+    });
 
     if (!flag) {
       return res.status(404).json({ message: "Feature flag not found" });
@@ -110,12 +145,34 @@ const deleteFlag = async (req, res) => {
       return res.status(400).json({ message: "Tenant context is required" });
     }
 
-    const flag = await FeatureFlag.findOneAndDelete({
+    const flag = await FeatureFlag.findOne({
       _id: req.params.id,
       tenantId,
     });
 
     if (!flag) {
+      return res.status(404).json({ message: "Feature flag not found" });
+    }
+
+    await FeatureFlag.findOneAndDelete({
+      _id: req.params.id,
+      tenantId,
+    });
+
+    await AuditLog.create({
+      tenantId,
+      actorId: req.user.userId,
+      action: "delete",
+      before: {
+        name: flag.name,
+        key: flag.key,
+        description: flag.description,
+        enabled: flag.enabled,
+      },
+      after: null,
+    });
+
+    return res.status(200).json({
       return res.status(404).json({ message: "Feature flag not found" });
     }
 
@@ -148,8 +205,17 @@ const toggleFlag = async (req, res) => {
       return res.status(404).json({ message: "Feature flag not found" });
     }
 
+    const before = { enabled: flag.enabled };
     flag.enabled = !flag.enabled;
     await flag.save();
+
+    await AuditLog.create({
+      tenantId,
+      actorId: req.user.userId,
+      action: "toggle",
+      before,
+      after: { enabled: flag.enabled },
+    });
 
     return res.status(200).json({
       message: "Feature flag toggled successfully",
@@ -163,10 +229,33 @@ const toggleFlag = async (req, res) => {
   }
 };
 
+const evaluateFlagRoute = async (req, res) => {
+  try {
+    const { key, userId } = req.body;
+
+    if (!key) {
+      return res.status(400).json({ message: "Flag key is required" });
+    }
+
+    const flag = await FeatureFlag.findOne({ key, tenantId: req.query.tenantId || req.user?.tenantId });
+
+    if (!flag) {
+      return res.status(404).json({ message: "Feature flag not found" });
+    }
+
+    const enabled = evaluateFlag(flag, { userId, flagKey: key });
+
+    return res.status(200).json({ enabled, flagKey: key });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to evaluate flag", error: error.message });
+  }
+};
+
 module.exports = {
   createFlag,
   getFlags,
   updateFlag,
   deleteFlag,
   toggleFlag,
+  evaluateFlagRoute,
 };

@@ -36,7 +36,7 @@ const navItems = [
 
 function App() {
   const [path, setPath] = useState(window.location.hash.replace('#', '') || '/dashboard')
-  const [token, setToken] = useState(localStorage.getItem('token') || '')
+  const [token, setToken] = useState(localStorage.getItem('accessToken') || '')
   const [user, setUser] = useState(getStoredUser())
 
   useEffect(() => {
@@ -78,15 +78,17 @@ function App() {
   }
 
   const handleAuth = (authData) => {
-    localStorage.setItem('token', authData.token)
+    localStorage.setItem('accessToken', authData.accessToken || authData.token)
+    localStorage.setItem('refreshToken', authData.refreshToken || '')
     localStorage.setItem('user', JSON.stringify(authData.user))
-    setToken(authData.token)
+    setToken(authData.accessToken || authData.token)
     setUser(authData.user)
     navigate('/dashboard')
   }
 
   const handleLogout = () => {
-    localStorage.removeItem('token')
+    localStorage.removeItem('accessToken')
+    localStorage.removeItem('refreshToken')
     localStorage.removeItem('user')
     setToken('')
     setUser(null)
@@ -483,11 +485,15 @@ function FeatureFlagsPage({ api }) {
   const [flags, setFlags] = useState(initialFlags)
   const [form, setForm] = useState({ name: '', key: '', description: '', enabled: false })
   const [message, setMessage] = useState('')
+  const [auditLogs, setAuditLogs] = useState([])
+  const [evaluateForm, setEvaluateForm] = useState({ key: '', userId: '' })
+  const [evaluation, setEvaluation] = useState(null)
 
   const loadFlags = useCallback(async () => {
     try {
       const data = await api.request('/flags')
       setFlags(data.flags || [])
+      setAuditLogs(data.auditLogs || [])
     } catch (err) {
       setMessage(err.message)
     }
@@ -512,6 +518,24 @@ function FeatureFlagsPage({ api }) {
       })
       setForm({ name: '', key: '', description: '', enabled: false })
       loadFlags()
+    } catch (err) {
+      setMessage(err.message)
+    }
+  }
+
+  const evaluate = async (event) => {
+    event.preventDefault()
+    setMessage('')
+
+    try {
+      const data = await api.request('/flags/evaluate', {
+        method: 'POST',
+        body: JSON.stringify({
+          key: evaluateForm.key,
+          userId: evaluateForm.userId,
+        }),
+      })
+      setEvaluation(data)
     } catch (err) {
       setMessage(err.message)
     }
@@ -574,6 +598,28 @@ function FeatureFlagsPage({ api }) {
         </button>
       </form>
       {message && <p className="error-text">{message}</p>}
+      <form className="inline-form" onSubmit={evaluate}>
+        <input
+          placeholder="Flag key"
+          value={evaluateForm.key}
+          onChange={(event) => setEvaluateForm({ ...evaluateForm, key: event.target.value })}
+          required
+        />
+        <input
+          placeholder="User ID"
+          value={evaluateForm.userId}
+          onChange={(event) => setEvaluateForm({ ...evaluateForm, userId: event.target.value })}
+          required
+        />
+        <button className="ghost-button" type="submit">
+          Evaluate
+        </button>
+      </form>
+      {evaluation && (
+        <p className="success-text">
+          {evaluation.flagKey} is {evaluation.enabled ? 'enabled' : 'disabled'} for user {evaluation.userId || evaluateForm.userId}
+        </p>
+      )}
       <div className="flag-list">
         {flags.map((flag) => (
           <article className="flag-row" key={flag._id}>
@@ -591,6 +637,19 @@ function FeatureFlagsPage({ api }) {
             </button>
           </article>
         ))}
+      </div>
+      <div className="activity-panel">
+        <h3>Recent audit history</h3>
+        {auditLogs.length === 0 ? (
+          <p>No activity yet.</p>
+        ) : (
+          auditLogs.map((entry) => (
+            <div className="timeline-row" key={entry._id}>
+              <span>{entry.action} · {entry.after?.name || entry.before?.name || 'flag'}</span>
+              <strong>{new Date(entry.createdAt).toLocaleString()}</strong>
+            </div>
+          ))
+        )}
       </div>
     </section>
   )
