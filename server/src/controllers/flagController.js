@@ -1,13 +1,14 @@
 const FeatureFlag = require("../models/FeatureFlag");
 const AuditLog = require("../models/AuditLog");
+const Tenant = require("../models/Tenant");
 const { evaluateFlag } = require("../utils/flagEvaluation");
 
 const getTenantId = (req) => req.user && req.user.tenantId;
 
 const createFlag = async (req, res) => {
   try {
-    const { name, key, description, enabled } = req.body;
-    const tenantId = getTenantId(req);
+    const { name, key, description, enabled, tenantId: requestedTenantId } = req.body;
+    const tenantId = requestedTenantId || getTenantId(req);
 
     if (!tenantId) {
       return res.status(400).json({ message: "Tenant context is required" });
@@ -15,6 +16,12 @@ const createFlag = async (req, res) => {
 
     if (!name || !key) {
       return res.status(400).json({ message: "Flag name and key are required" });
+    }
+
+    const tenant = await Tenant.findById(tenantId);
+
+    if (!tenant) {
+      return res.status(404).json({ message: "Tenant not found" });
     }
 
     const flag = await FeatureFlag.create({
@@ -74,14 +81,14 @@ const getFlags = async (req, res) => {
 
 const updateFlag = async (req, res) => {
   try {
-    const { name, key, description, enabled } = req.body;
+    const { name, key, description, enabled, tenantId: requestedTenantId } = req.body;
     const tenantId = getTenantId(req);
 
     if (!tenantId) {
       return res.status(400).json({ message: "Tenant context is required" });
     }
 
-    if (!name && !key && description === undefined && enabled === undefined) {
+    if (!name && !key && description === undefined && enabled === undefined && !requestedTenantId) {
       return res.status(400).json({ message: "No update fields provided" });
     }
 
@@ -91,9 +98,16 @@ const updateFlag = async (req, res) => {
       return res.status(404).json({ message: "Feature flag not found" });
     }
 
+    const targetTenantId = requestedTenantId || tenantId;
+    const tenant = await Tenant.findById(targetTenantId);
+
+    if (!tenant) {
+      return res.status(404).json({ message: "Tenant not found" });
+    }
+
     const flag = await FeatureFlag.findOneAndUpdate(
       { _id: req.params.id, tenantId },
-      { name, key, description, enabled },
+      { name, key, description, enabled, tenantId: targetTenantId },
       { new: true, runValidators: true }
     );
 
@@ -171,10 +185,6 @@ const deleteFlag = async (req, res) => {
       },
       after: null,
     });
-
-    return res.status(200).json({
-      return res.status(404).json({ message: "Feature flag not found" });
-    }
 
     return res.status(200).json({
       message: "Feature flag deleted successfully",

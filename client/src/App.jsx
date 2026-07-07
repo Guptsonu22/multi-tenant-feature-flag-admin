@@ -329,7 +329,7 @@ function AuthLayout({ children, subtitle, title }) {
 }
 
 function DashboardPage({ api, user }) {
-  const [stats, setStats] = useState({ tenants: 0, flags: initialFlags.length, enabled: 1 })
+  const [stats, setStats] = useState({ tenants: 0, flags: 0, enabled: 0, disabled: 0 })
 
   useEffect(() => {
     let ignore = false
@@ -343,15 +343,17 @@ function DashboardPage({ api, user }) {
 
         if (!ignore) {
           const flags = flagData.flags || []
+          const enabled = flags.filter((flag) => flag.enabled).length
           setStats({
             tenants: tenantData.tenants?.length || 0,
             flags: flags.length,
-            enabled: flags.filter((flag) => flag.enabled).length,
+            enabled,
+            disabled: flags.length - enabled,
           })
         }
       } catch {
         if (!ignore) {
-          setStats({ tenants: 1, flags: initialFlags.length, enabled: 1 })
+          setStats({ tenants: 0, flags: 0, enabled: 0, disabled: 0 })
         }
       }
     }
@@ -374,6 +376,7 @@ function DashboardPage({ api, user }) {
         <StatCard label="Tenants" value={stats.tenants} />
         <StatCard label="Feature Flags" value={stats.flags} />
         <StatCard label="Enabled Flags" value={stats.enabled} />
+        <StatCard label="Disabled Flags" value={stats.disabled} />
       </div>
       <div className="activity-panel">
         <h3>Milestone status</h3>
@@ -411,13 +414,15 @@ function TenantsPage({ api }) {
   const [tenants, setTenants] = useState([])
   const [form, setForm] = useState({ name: '', description: '' })
   const [message, setMessage] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [editingTenantId, setEditingTenantId] = useState(null)
 
   const loadTenants = useCallback(async () => {
     try {
       const data = await api.request('/tenants')
       setTenants(data.tenants || [])
     } catch (err) {
-      setMessage(err.message)
+      setMessage(`❌ ${err.message}`)
     }
   }, [api])
 
@@ -432,16 +437,55 @@ function TenantsPage({ api }) {
   const submit = async (event) => {
     event.preventDefault()
     setMessage('')
+    setIsSubmitting(true)
 
     try {
-      await api.request('/tenants', {
-        method: 'POST',
-        body: JSON.stringify(form),
-      })
+      if (editingTenantId) {
+        await api.request(`/tenants/${editingTenantId}`, {
+          method: 'PUT',
+          body: JSON.stringify(form),
+        })
+      } else {
+        await api.request('/tenants', {
+          method: 'POST',
+          body: JSON.stringify(form),
+        })
+      }
+
       setForm({ name: '', description: '' })
-      loadTenants()
+      setEditingTenantId(null)
+      setMessage(`✅ Tenant ${editingTenantId ? 'updated' : 'added'} successfully`)
+      await loadTenants()
     } catch (err) {
-      setMessage(err.message)
+      setMessage(`❌ ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const startEdit = (tenant) => {
+    setEditingTenantId(tenant._id)
+    setForm({ name: tenant.name, description: tenant.description || '' })
+    setMessage('')
+  }
+
+  const cancelEdit = () => {
+    setEditingTenantId(null)
+    setForm({ name: '', description: '' })
+    setMessage('')
+  }
+
+  const removeTenant = async (tenant) => {
+    if (!window.confirm(`Delete tenant ${tenant.name}?`)) {
+      return
+    }
+
+    try {
+      await api.request(`/tenants/${tenant._id}`, { method: 'DELETE' })
+      setMessage('✅ Tenant deleted successfully')
+      await loadTenants()
+    } catch (err) {
+      setMessage(`❌ ${err.message}`)
     }
   }
 
@@ -465,17 +509,32 @@ function TenantsPage({ api }) {
           value={form.description}
           onChange={(event) => setForm({ ...form, description: event.target.value })}
         />
-        <button className="primary-button" type="submit">
-          Add Tenant
-        </button>
+        <div className="form-actions">
+          <button className="primary-button" type="submit" disabled={isSubmitting}>
+            {isSubmitting ? (editingTenantId ? 'Updating...' : 'Adding...') : (editingTenantId ? 'Update Tenant' : 'Add Tenant')}
+          </button>
+          {editingTenantId && (
+            <button className="ghost-button" type="button" onClick={cancelEdit}>
+              Cancel
+            </button>
+          )}
+        </div>
       </form>
-      {message && <p className="error-text">{message}</p>}
+      {message && <FeedbackBanner type={message.startsWith('✅') ? 'success' : 'error'}>{message}</FeedbackBanner>}
       <DataTable
-        columns={['Name', 'Description', 'Created']}
+        columns={['Name', 'Description', 'Created', 'Actions']}
         rows={tenants.map((tenant) => [
-          tenant.name,
+          <strong key={`${tenant._id}-name`}>{tenant.name}</strong>,
           tenant.description || '-',
           formatDate(tenant.createdAt),
+          <div className="action-buttons" key={`${tenant._id}-actions`}>
+            <button className="ghost-button small" type="button" onClick={() => startEdit(tenant)}>
+              Edit
+            </button>
+            <button className="ghost-button small danger" type="button" onClick={() => removeTenant(tenant)}>
+              Delete
+            </button>
+          </div>,
         ])}
       />
     </section>
@@ -484,43 +543,100 @@ function TenantsPage({ api }) {
 
 function FeatureFlagsPage({ api }) {
   const [flags, setFlags] = useState(initialFlags)
-  const [form, setForm] = useState({ name: '', key: '', description: '', enabled: false })
+  const [tenants, setTenants] = useState([])
+  const [form, setForm] = useState({ name: '', key: '', description: '', enabled: false, tenantId: '' })
   const [message, setMessage] = useState('')
   const [auditLogs, setAuditLogs] = useState([])
   const [evaluateForm, setEvaluateForm] = useState({ key: '', userId: '' })
   const [evaluation, setEvaluation] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [editingFlagId, setEditingFlagId] = useState(null)
 
-  const loadFlags = useCallback(async () => {
+  const loadData = useCallback(async () => {
     try {
-      const data = await api.request('/flags')
-      setFlags(data.flags || [])
-      setAuditLogs(data.auditLogs || [])
+      const [tenantData, flagData] = await Promise.all([
+        api.request('/tenants'),
+        api.request('/flags'),
+      ])
+      setTenants(tenantData.tenants || [])
+      setFlags(flagData.flags || [])
+      setAuditLogs(flagData.auditLogs || [])
     } catch (err) {
-      setMessage(err.message)
+      setMessage(`❌ ${err.message}`)
     }
   }, [api])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      loadFlags()
+      loadData()
     }, 0)
 
     return () => window.clearTimeout(timer)
-  }, [loadFlags])
+  }, [loadData])
 
   const submit = async (event) => {
     event.preventDefault()
     setMessage('')
+    setIsSubmitting(true)
 
     try {
-      await api.request('/flags', {
-        method: 'POST',
-        body: JSON.stringify(form),
-      })
-      setForm({ name: '', key: '', description: '', enabled: false })
-      loadFlags()
+      const payload = {
+        ...form,
+        tenantId: form.tenantId || tenants[0]?._id || '',
+      }
+
+      if (editingFlagId) {
+        await api.request(`/flags/${editingFlagId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        })
+      } else {
+        await api.request('/flags', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        })
+      }
+
+      setForm({ name: '', key: '', description: '', enabled: false, tenantId: '' })
+      setEditingFlagId(null)
+      setMessage(`✅ Flag ${editingFlagId ? 'updated' : 'created'} successfully`)
+      await loadData()
     } catch (err) {
-      setMessage(err.message)
+      setMessage(`❌ ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const startEdit = (flag) => {
+    setEditingFlagId(flag._id)
+    setForm({
+      name: flag.name,
+      key: flag.key,
+      description: flag.description || '',
+      enabled: flag.enabled,
+      tenantId: flag.tenantId || '',
+    })
+    setMessage('')
+  }
+
+  const cancelEdit = () => {
+    setEditingFlagId(null)
+    setForm({ name: '', key: '', description: '', enabled: false, tenantId: '' })
+    setMessage('')
+  }
+
+  const removeFlag = async (flag) => {
+    if (!window.confirm(`Delete flag ${flag.name}?`)) {
+      return
+    }
+
+    try {
+      await api.request(`/flags/${flag._id}`, { method: 'DELETE' })
+      setMessage('✅ Flag deleted successfully')
+      await loadData()
+    } catch (err) {
+      setMessage(`❌ ${err.message}`)
     }
   }
 
@@ -538,7 +654,7 @@ function FeatureFlagsPage({ api }) {
       })
       setEvaluation(data)
     } catch (err) {
-      setMessage(err.message)
+      setMessage(`❌ ${err.message}`)
     }
   }
 
@@ -554,9 +670,9 @@ function FeatureFlagsPage({ api }) {
 
     try {
       await api.request(`/flags/${flag._id}/toggle`, { method: 'PATCH' })
-      loadFlags()
+      await loadData()
     } catch (err) {
-      setMessage(err.message)
+      setMessage(`❌ ${err.message}`)
     }
   }
 
@@ -586,6 +702,18 @@ function FeatureFlagsPage({ api }) {
           value={form.description}
           onChange={(event) => setForm({ ...form, description: event.target.value })}
         />
+        <select
+          value={form.tenantId}
+          onChange={(event) => setForm({ ...form, tenantId: event.target.value })}
+          required
+        >
+          <option value="">Select tenant</option>
+          {tenants.map((tenant) => (
+            <option key={tenant._id} value={tenant._id}>
+              {tenant.name}
+            </option>
+          ))}
+        </select>
         <label className="check-label">
           <input
             type="checkbox"
@@ -594,11 +722,18 @@ function FeatureFlagsPage({ api }) {
           />
           Enabled
         </label>
-        <button className="primary-button" type="submit">
-          Add Flag
-        </button>
+        <div className="form-actions">
+          <button className="primary-button" type="submit" disabled={isSubmitting}>
+            {isSubmitting ? (editingFlagId ? 'Updating...' : 'Adding...') : (editingFlagId ? 'Update Flag' : 'Add Flag')}
+          </button>
+          {editingFlagId && (
+            <button className="ghost-button" type="button" onClick={cancelEdit}>
+              Cancel
+            </button>
+          )}
+        </div>
       </form>
-      {message && <p className="error-text">{message}</p>}
+      {message && <FeedbackBanner type={message.startsWith('✅') ? 'success' : 'error'}>{message}</FeedbackBanner>}
       <form className="inline-form" onSubmit={evaluate}>
         <input
           placeholder="Flag key"
@@ -621,23 +756,50 @@ function FeatureFlagsPage({ api }) {
           {evaluation.flagKey} is {evaluation.enabled ? 'enabled' : 'disabled'} for user {evaluation.userId || evaluateForm.userId}
         </p>
       )}
-      <div className="flag-list">
-        {flags.map((flag) => (
-          <article className="flag-row" key={flag._id}>
-            <div>
-              <strong>{flag.name}</strong>
-              <span>{flag.key}</span>
-              <p>{flag.description || 'No description'}</p>
-            </div>
-            <button
-              className={flag.enabled ? 'toggle enabled' : 'toggle'}
-              type="button"
-              onClick={() => toggle(flag)}
-            >
-              {flag.enabled ? 'On' : 'Off'}
-            </button>
-          </article>
-        ))}
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Key</th>
+              <th>Tenant</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {flags.map((flag) => {
+              const tenantName = tenants.find((tenant) => tenant._id === flag.tenantId)?.name || 'Current Tenant'
+
+              return (
+                <tr key={flag._id}>
+                  <td>{flag.name}</td>
+                  <td>{flag.key}</td>
+                  <td>{tenantName}</td>
+                  <td>
+                    <button
+                      className={flag.enabled ? 'toggle-pill enabled' : 'toggle-pill'}
+                      type="button"
+                      onClick={() => toggle(flag)}
+                    >
+                      {flag.enabled ? 'ON' : 'OFF'}
+                    </button>
+                  </td>
+                  <td>
+                    <div className="action-buttons">
+                      <button className="ghost-button small" type="button" onClick={() => startEdit(flag)}>
+                        Edit
+                      </button>
+                      <button className="ghost-button small danger" type="button" onClick={() => removeFlag(flag)}>
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
       <div className="activity-panel">
         <h3>Recent audit history</h3>
@@ -674,9 +836,9 @@ function DataTable({ columns, rows }) {
             </tr>
           ) : (
             rows.map((row, index) => (
-              <tr key={`${row[0]}-${index}`}>
-                {row.map((cell) => (
-                  <td key={cell}>{cell}</td>
+              <tr key={`row-${index}`}>
+                {row.map((cell, cellIndex) => (
+                  <td key={`${index}-${cellIndex}`}>{cell}</td>
                 ))}
               </tr>
             ))
@@ -685,6 +847,10 @@ function DataTable({ columns, rows }) {
       </table>
     </div>
   )
+}
+
+function FeedbackBanner({ children, type }) {
+  return <div className={`feedback-banner ${type === 'success' ? 'success' : 'error'}`}>{children}</div>
 }
 
 function formatDate(value) {
