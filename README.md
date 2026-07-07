@@ -1,6 +1,6 @@
 # Multi-Tenant Feature Flag Admin
 
-A full-stack administration dashboard for managing tenants and tenant-scoped feature flags. The project demonstrates JWT authentication, role-based access control (RBAC), tenant isolation, deterministic flag evaluation, audit logging, and a responsive React interface.
+A full-stack administration dashboard for managing tenants and feature flags. The project demonstrates JWT authentication, role-based access control (RBAC), tenant-aware flag queries, deterministic flag evaluation, audit logging, and a responsive React interface.
 
 ## Features
 
@@ -53,7 +53,7 @@ Mongoose models
 MongoDB
 ```
 
-The API follows a route-controller-model structure. Protected requests carry a bearer token, authentication middleware adds the decoded user to the request, and controllers scope database operations using the user's tenant ID. The Vite development server proxies `/api` requests to the Express server.
+The API follows a route-controller-model structure. Protected requests carry a bearer token, and authentication middleware adds the decoded user to the request. Flag reads and most flag mutations use the tenant ID from that token. The Vite development server proxies `/api` requests to the Express server.
 
 ## Folder Structure
 
@@ -155,13 +155,20 @@ npm run preview
 
 Access tokens expire after one day; refresh tokens expire after seven days.
 
-## RBAC and Tenant Isolation
+## RBAC and Tenant Scoping
 
 The user model supports `owner`, `admin`, `member`, and `viewer` roles. New registrations create an `owner`. Tenant CRUD and flag mutations require `owner` or `admin`; authenticated users may read flags.
 
 Flag reads, updates, toggles, and deletes are filtered using the tenant ID from the authenticated token. Feature flag keys are unique per tenant through a compound MongoDB index on `{ tenantId, key }`.
 
-> Note: the current MVP has no user-management or invitation screen, so additional roles must currently be provisioned outside the UI.
+Current MVP limitations:
+
+- Tenant CRUD operates across the shared tenant collection and is not restricted to the user's own tenant.
+- Flag creation accepts a tenant ID from the request body, and flag updates can move a flag to another tenant.
+- The public evaluation endpoint accepts a tenant ID supplied by the caller.
+- There is no user-management or invitation screen, so additional roles must be provisioned outside the UI.
+
+Strict production isolation would require organization-membership checks on every tenant and flag operation.
 
 ## API Routes
 
@@ -222,7 +229,7 @@ Flag creation, update, toggle, and deletion create audit records containing:
 - Before and after snapshots
 - Creation timestamp
 
-The latest 20 audit records for the authenticated tenant are returned with the flag list and displayed in the dashboard.
+The latest 20 audit records for the authenticated tenant are returned with the flag list and displayed on the Feature Flags page.
 
 ## Testing and Quality Checks
 
@@ -245,23 +252,25 @@ The automated tests currently cover boolean evaluation and deterministic percent
 
 ## Screenshots
 
-Add captured images to a `docs/screenshots/` directory and replace the placeholders below:
+### Login
 
-### Authentication
+![Login page](1.jpeg)
 
-_Login and registration screenshot_
+### Registration
+
+![Registration page](2.jpeg)
 
 ### Dashboard
 
-_Dashboard statistics screenshot_
+![Dashboard with tenant and feature flag statistics](3.jpeg)
 
 ### Tenant Management
 
-_Tenant CRUD screenshot_
+![Tenant management page](4.jpeg)
 
-### Feature Flags and Audit History
+### Feature Flag Management
 
-_Feature flag controls and audit history screenshot_
+![Feature flag management and evaluation controls](5.jpeg)
 
 ## Trade-offs
 
@@ -269,6 +278,7 @@ _Feature flag controls and audit history screenshot_
 - Tokens are stored in `localStorage`, which is straightforward for an MVP but less resistant to XSS than secure, HTTP-only cookies.
 - Refresh tokens are stateless and are not persisted or revocable.
 - The public evaluation endpoint favors easy SDK-style access but currently has no API key, rate limiting, or request signing.
+- Tenant administration and cross-tenant flag selection are intentionally broad in this MVP and require membership-based authorization before production use.
 - MongoDB compound indexes provide per-tenant key uniqueness without introducing a separate configuration service or cache.
 - Audit history is embedded in the flag-list response for simplicity rather than exposed through a paginated endpoint.
 - The application uses local development processes instead of Docker or cloud deployment configuration.
