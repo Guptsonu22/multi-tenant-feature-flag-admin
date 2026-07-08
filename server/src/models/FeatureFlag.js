@@ -31,6 +31,12 @@ const featureFlagSchema = new mongoose.Schema(
       required: true,
     },
 
+    tenantName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

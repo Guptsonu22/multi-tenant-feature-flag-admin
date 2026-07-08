@@ -53,7 +53,7 @@ Mongoose models
 MongoDB
 ```
 
-The API follows a route-controller-model structure. Protected requests carry a bearer token, and authentication middleware adds the decoded user to the request. Flag reads and most flag mutations use the tenant ID from that token. The Vite development server proxies `/api` requests to the Express server.
+The API follows a route-controller-model structure. Protected requests carry a bearer token, and authentication middleware adds the decoded user to the request. Owners and admins can manage flags across listed tenants; other roles are scoped to the tenant ID in their token. The Vite development server proxies `/api` requests to the Express server.
 
 ## Folder Structure
 
@@ -159,12 +159,12 @@ Access tokens expire after one day; refresh tokens expire after seven days.
 
 The user model supports `owner`, `admin`, `member`, and `viewer` roles. New registrations create an `owner`. Tenant CRUD and flag mutations require `owner` or `admin`; authenticated users may read flags.
 
-Flag reads, updates, toggles, and deletes are filtered using the tenant ID from the authenticated token. Feature flag keys are unique per tenant through a compound MongoDB index on `{ tenantId, key }`.
+Owners and admins can read and manage flags across tenants. Other authenticated roles are filtered using the tenant ID from their token. Every flag stores its tenant reference and a tenant-name snapshot, while live tenant names are populated for display. Feature flag keys are unique per tenant through a compound MongoDB index on `{ tenantId, key }`.
 
 Current MVP limitations:
 
 - Tenant CRUD operates across the shared tenant collection and is not restricted to the user's own tenant.
-- Flag creation accepts a tenant ID from the request body, and flag updates can move a flag to another tenant.
+- Owners and admins can select a tenant during flag creation and move a flag to another listed tenant during update.
 - The public evaluation endpoint accepts a tenant ID supplied by the caller.
 - There is no user-management or invitation screen, so additional roles must be provisioned outside the UI.
 
@@ -195,7 +195,7 @@ Unless marked public, send an access token in the `Authorization` header.
 
 | Method | Route | Access | Purpose |
 |---|---|---|---|
-| `GET` | `/api/flags` | Authenticated | List current-tenant flags and recent audit entries |
+| `GET` | `/api/flags` | Authenticated | List accessible flags and recent audit entries |
 | `POST` | `/api/flags` | Owner/Admin | Create a flag |
 | `PUT` | `/api/flags/:id` | Owner/Admin | Update a flag |
 | `PATCH` | `/api/flags/:id/toggle` | Owner/Admin | Toggle a flag |

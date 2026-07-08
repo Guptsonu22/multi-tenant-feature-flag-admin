@@ -34,6 +34,14 @@ const navItems = [
   { path: '/flags', label: 'Feature Flags' },
 ]
 
+const getDocumentId = (value) => {
+  if (value && typeof value === 'object') {
+    return value._id || value.id || ''
+  }
+
+  return value || ''
+}
+
 function App() {
   const [path, setPath] = useState(window.location.hash.replace('#', '') || '/dashboard')
   const [token, setToken] = useState(localStorage.getItem('accessToken') || '')
@@ -633,7 +641,7 @@ function FeatureFlagsPage({ api }) {
       key: flag.key,
       description: flag.description || '',
       enabled: flag.enabled,
-      tenantId: flag.tenantId || '',
+      tenantId: getDocumentId(flag.tenantId),
     })
     setMessage('')
   }
@@ -800,33 +808,37 @@ function FeatureFlagsPage({ api }) {
         <table className="data-table">
           <thead>
             <tr>
+              <th>User ID</th>
               <th>Name</th>
               <th>Key</th>
               <th>Tenant</th>
-              <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {flags.map((flag) => {
-              const tenantName = tenants.find((tenant) => tenant._id === flag.tenantId)?.name || 'Current Tenant'
+              const tenantId = getDocumentId(flag.tenantId)
+              const tenantName = flag.tenantId?.name
+                || flag.tenantName
+                || tenants.find((tenant) => getDocumentId(tenant) === tenantId)?.name
+                || 'Unknown tenant'
+              const creatorId = getDocumentId(flag.createdBy)
 
               return (
                 <tr key={flag._id}>
+                  <td>{creatorId || 'Not available'}</td>
                   <td>{flag.name}</td>
                   <td>{flag.key}</td>
                   <td>{tenantName}</td>
                   <td>
-                    <button
-                      className={flag.enabled ? 'toggle-pill enabled' : 'toggle-pill'}
-                      type="button"
-                      onClick={() => toggle(flag)}
-                    >
-                      {flag.enabled ? 'ON' : 'OFF'}
-                    </button>
-                  </td>
-                  <td>
                     <div className="action-buttons">
+                      <button
+                        className={flag.enabled ? 'toggle-pill enabled' : 'toggle-pill'}
+                        type="button"
+                        onClick={() => toggle(flag)}
+                      >
+                        {flag.enabled ? 'ON' : 'OFF'}
+                      </button>
                       <button className="ghost-button small" type="button" onClick={() => startEdit(flag)}>
                         Edit
                       </button>

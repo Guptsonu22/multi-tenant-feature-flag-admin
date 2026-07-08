@@ -4,6 +4,12 @@ const Tenant = require("../models/Tenant");
 const { evaluateFlag } = require("../utils/flagEvaluation");
 
 const getTenantId = (req) => req.user && req.user.tenantId;
+const canManageAllTenants = (req) =>
+  req.user && ["owner", "admin"].includes(req.user.role);
+const getFlagFilter = (req, flagId) => ({
+  _id: flagId,
+  ...(canManageAllTenants(req) ? {} : { tenantId: getTenantId(req) }),
+});
 
 const createFlag = async (req, res) => {
   try {
@@ -30,6 +36,7 @@ const createFlag = async (req, res) => {
       description,
       enabled,
       tenantId,
+      tenantName: tenant.name,
       createdBy: req.user.userId,
     });
 
@@ -67,8 +74,50 @@ const getFlags = async (req, res) => {
       return res.status(400).json({ message: "Tenant context is required" });
     }
 
-    const flags = await FeatureFlag.find({ tenantId }).sort({ createdAt: -1 });
-    const auditLogs = await AuditLog.find({ tenantId }).sort({ createdAt: -1 }).limit(20);
+    const flagFilter = canManageAllTenants(req) ? {} : { tenantId };
+    const auditFilter = canManageAllTenants(req) ? {} : { tenantId };
+
+    const flags = await FeatureFlag.find(flagFilter)
+      .populate("tenantId", "name")
+      .populate({
+        path: "createdBy",
+        select: "_id tenantId",
+        populate: { path: "tenantId", select: "name" },
+      })
+      .sort({ createdAt: -1 })
+      .lean();
+    const tenants = await Tenant.find({}, "name").lean();
+    const tenantsByName = new Map(
+      tenants.map((tenant) => [tenant.name.toLowerCase(), tenant])
+    );
+
+    await Promise.all(
+      flags.map(async (flag) => {
+        const creatorTenant = flag.createdBy?.tenantId;
+        const snapshotTenant = flag.tenantName
+          ? tenantsByName.get(flag.tenantName.toLowerCase())
+          : null;
+        const resolvedTenant =
+          flag.tenantId || snapshotTenant || (!flag.tenantName ? creatorTenant : null);
+        const resolvedTenantName =
+          flag.tenantId?.name || snapshotTenant?.name || flag.tenantName || creatorTenant?.name;
+
+        if (!resolvedTenant || !resolvedTenantName) {
+          return;
+        }
+
+        const update = { tenantName: resolvedTenantName };
+
+        if (!flag.tenantId && resolvedTenant?._id) {
+          update.tenantId = resolvedTenant._id;
+        }
+
+        await FeatureFlag.updateOne({ _id: flag._id }, { $set: update });
+        flag.tenantId = resolvedTenant;
+        flag.tenantName = resolvedTenantName;
+      })
+    );
+    const auditLogs = await AuditLog.find(auditFilter).sort({ createdAt: -1 }).limit(20);
 
     return res.status(200).json({ flags, auditLogs });
   } catch (error) {
@@ -92,13 +141,14 @@ const updateFlag = async (req, res) => {
       return res.status(400).json({ message: "No update fields provided" });
     }
 
-    const existing = await FeatureFlag.findOne({ _id: req.params.id, tenantId });
+    const flagFilter = getFlagFilter(req, req.params.id);
+    const existing = await FeatureFlag.findOne(flagFilter);
 
     if (!existing) {
       return res.status(404).json({ message: "Feature flag not found" });
     }
 
-    const targetTenantId = requestedTenantId || tenantId;
+    const targetTenantId = requestedTenantId || existing.tenantId;
     const tenant = await Tenant.findById(targetTenantId);
 
     if (!tenant) {
@@ -106,13 +156,20 @@ const updateFlag = async (req, res) => {
     }
 
     const flag = await FeatureFlag.findOneAndUpdate(
-      { _id: req.params.id, tenantId },
-      { name, key, description, enabled, tenantId: targetTenantId },
+      flagFilter,
+      {
+        name,
+        key,
+        description,
+        enabled,
+        tenantId: targetTenantId,
+        tenantName: tenant.name,
+      },
       { new: true, runValidators: true }
     );
 
     await AuditLog.create({
-      tenantId,
+      tenantId: targetTenantId,
       actorId: req.user.userId,
       action: "update",
       before: {
@@ -159,22 +216,17 @@ const deleteFlag = async (req, res) => {
       return res.status(400).json({ message: "Tenant context is required" });
     }
 
-    const flag = await FeatureFlag.findOne({
-      _id: req.params.id,
-      tenantId,
-    });
+    const flagFilter = getFlagFilter(req, req.params.id);
+    const flag = await FeatureFlag.findOne(flagFilter);
 
     if (!flag) {
       return res.status(404).json({ message: "Feature flag not found" });
     }
 
-    await FeatureFlag.findOneAndDelete({
-      _id: req.params.id,
-      tenantId,
-    });
+    await FeatureFlag.findOneAndDelete(flagFilter);
 
     await AuditLog.create({
-      tenantId,
+      tenantId: flag.tenantId,
       actorId: req.user.userId,
       action: "delete",
       before: {
@@ -206,10 +258,7 @@ const toggleFlag = async (req, res) => {
       return res.status(400).json({ message: "Tenant context is required" });
     }
 
-    const flag = await FeatureFlag.findOne({
-      _id: req.params.id,
-      tenantId,
-    });
+    const flag = await FeatureFlag.findOne(getFlagFilter(req, req.params.id));
 
     if (!flag) {
       return res.status(404).json({ message: "Feature flag not found" });
@@ -220,7 +269,7 @@ const toggleFlag = async (req, res) => {
     await flag.save();
 
     await AuditLog.create({
-      tenantId,
+      tenantId: flag.tenantId,
       actorId: req.user.userId,
       action: "toggle",
       before,
